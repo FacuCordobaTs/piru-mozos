@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import {
   addPedidoItem, ApiError, clearSession, connectPedidos, createPedido, deletePedidoItem,
   getMenu, getMesas, getPedido, getSession, login, updatePedidoDatos,
@@ -9,6 +9,11 @@ type DraftItem = { producto: Producto; cantidad: number; varianteId?: number; in
 
 const money = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 })
 const estadoLabel: Record<string, string> = { pending: 'Pendiente', confirmed: 'Confirmado', preparing: 'Preparando', ready: 'Listo', delivered: 'Entregado' }
+// Mapa de mesas: mismas medidas y reglas del plano del admin (MesasOperativas).
+const MAPA_CELL = 56
+const MAPA_MIN_ZOOM = 0.2
+const MAPA_MAX_ZOOM = 1.5
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 
 export function App() {
   const [session, setSession] = useState<Session | null>(() => getSession())
@@ -70,7 +75,7 @@ function Turno({ session, onSalir }: { session: Session; onSalir: () => void }) 
     {offline && <p className="network warning">Sin conexión: podés ver el menú guardado, pero no enviar pedidos.</p>}
     {error && <p className="network error" role="alert">{error}</p>}
     <section aria-labelledby="mesas-title"><div className="section-heading"><div><p className="eyebrow">Tu local</p><h2 id="mesas-title">Mesas</h2></div><button className="refresh" type="button" onClick={() => void cargar()} disabled={loading}>↻</button></div>
-      {loading ? <p className="muted loading">Actualizando mesas…</p> : <div className="mesa-grid">{mesas.map((m) => <button key={m.id} type="button" className={`mesa ${estadoMesa(m)}`} onClick={() => void abrirMesa(m)}><span className="mesa-number">{m.nombre.replace(/^Mesa\s*/i, '')}</span><span>{estadoMesaLabel(m)}</span>{m.pedido && <small>{money.format(Number(m.pedido.total))}</small>}</button>)}</div>}
+      <MapaMesas mesas={mesas} cargando={loading} onAbrir={(m) => void abrirMesa(m)} />
     </section></main>
 }
 
@@ -142,5 +147,78 @@ function Configurador({ producto, onClose, onAgregar }: { producto: Producto; on
 function precioItem(item: DraftItem) { const variante = item.producto.variantes.find((v) => v.id === item.varianteId); return Number(variante?.precio ?? item.producto.precio) + item.agregados.reduce((sum, id) => sum + Number(item.producto.agregados.find((a) => a.id === id)?.precio ?? 0), 0) }
 function descripcionItem(item: DraftItem) { const variante = item.producto.variantes.find((v) => v.id === item.varianteId)?.nombre; const extras = item.agregados.map((id) => item.producto.agregados.find((a) => a.id === id)?.nombre).filter(Boolean); return [variante, ...extras].filter(Boolean).join(' · ') || 'Sin cambios' }
 function estadoMesa(mesa: Mesa) { if (!mesa.pedido) return 'libre'; if (mesa.pedido.estado === 'ready') return 'lista'; if (mesa.pedido.estado === 'preparing') return 'preparando'; return 'ocupada' }
-function estadoMesaLabel(mesa: Mesa) { return mesa.pedido ? estadoLabel[mesa.pedido.estado] ?? 'Ocupada' : 'Libre' }
+function estadoMesaLabel(mesa: Mesa) { return { libre: 'Libre', lista: 'Lista', preparando: 'Preparando', ocupada: 'Ocupada' }[estadoMesa(mesa)] }
+
+function MapaMesas({ mesas, cargando, onAbrir }: { mesas: Mesa[]; cargando: boolean; onAbrir: (mesa: Mesa) => void }) {
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const [zoom, setZoom] = useState(1)
+  const limites = useMemo(() => {
+    if (mesas.length === 0) return { minX: 0, minY: 0, columnas: 1, filas: 1 }
+    const minX = Math.min(...mesas.map((m) => m.posicionX))
+    const minY = Math.min(...mesas.map((m) => m.posicionY))
+    const maxX = Math.max(...mesas.map((m) => m.posicionX + m.ancho))
+    const maxY = Math.max(...mesas.map((m) => m.posicionY + m.alto))
+    return { minX, minY, columnas: Math.max(1, maxX - minX), filas: Math.max(1, maxY - minY) }
+  }, [mesas])
+  const boardWidth = limites.columnas * MAPA_CELL + 32
+  const boardHeight = limites.filas * MAPA_CELL + 32
+
+  // Encuadra el plano completo apenas carga o cambia el tamaño del contenedor.
+  const encajar = useCallback(() => {
+    const viewport = viewportRef.current
+    if (!viewport || mesas.length === 0) return
+    setZoom(clamp(Math.min((viewport.clientWidth - 32) / boardWidth, (viewport.clientHeight - 32) / boardHeight, 1.15), MAPA_MIN_ZOOM, MAPA_MAX_ZOOM))
+    requestAnimationFrame(() => viewport.scrollTo({ left: 0, top: 0 }))
+  }, [boardHeight, boardWidth, mesas.length])
+
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport || mesas.length === 0) return
+    const frame = requestAnimationFrame(encajar)
+    const observer = new ResizeObserver(encajar)
+    observer.observe(viewport)
+    return () => { cancelAnimationFrame(frame); observer.disconnect() }
+  }, [encajar, mesas.length])
+
+  const cambiarZoom = (siguiente: number) => {
+    const viewport = viewportRef.current
+    const limitado = clamp(siguiente, MAPA_MIN_ZOOM, MAPA_MAX_ZOOM)
+    if (!viewport || limitado === zoom) { setZoom(limitado); return }
+    const centroX = (viewport.scrollLeft + viewport.clientWidth / 2) / zoom
+    const centroY = (viewport.scrollTop + viewport.clientHeight / 2) / zoom
+    setZoom(limitado)
+    requestAnimationFrame(() => viewport.scrollTo({ left: centroX * limitado - viewport.clientWidth / 2, top: centroY * limitado - viewport.clientHeight / 2 }))
+  }
+
+  if (cargando) return <p className="muted loading">Actualizando mesas…</p>
+  if (mesas.length === 0) return <p className="muted">Todavía no hay mesas configuradas.</p>
+
+  return <div>
+    <div className="mapa-toolbar">
+      <p className="mapa-hint">Tocá una mesa para tomar o consultar su pedido.</p>
+      <div className="mapa-controls">
+        <button type="button" aria-label="Alejar" disabled={zoom <= MAPA_MIN_ZOOM} onClick={() => cambiarZoom(zoom - 0.1)}>−</button>
+        <span className="mapa-zoom">{Math.round(zoom * 100)}%</span>
+        <button type="button" aria-label="Acercar" disabled={zoom >= MAPA_MAX_ZOOM} onClick={() => cambiarZoom(zoom + 0.1)}>+</button>
+        <button type="button" aria-label="Encuadrar todas las mesas" onClick={encajar}>⤢</button>
+      </div>
+    </div>
+    <div ref={viewportRef} className="mapa-mesas" onWheel={(event) => { if (event.ctrlKey || event.metaKey) { event.preventDefault(); cambiarZoom(zoom + (event.deltaY < 0 ? 0.1 : -0.1)) } }}>
+      <div className="mapa-contenedor" style={{ width: `max(100%, ${boardWidth * zoom}px)`, height: `max(100%, ${boardHeight * zoom}px)` }}>
+        <div className="mapa-plano" style={{ width: boardWidth, height: boardHeight, transform: `scale(${zoom})` }}>
+          {mesas.map((mesa) => {
+            const estado = estadoMesa(mesa)
+            const pedido = mesa.pedido
+            return <button key={mesa.id} type="button" aria-label={`${mesa.nombre}, ${estadoMesaLabel(mesa)}`} className={`mapa-mesa ${estado}`} onClick={() => onAbrir(mesa)} style={{ left: (mesa.posicionX - limites.minX) * MAPA_CELL + 16, top: (mesa.posicionY - limites.minY) * MAPA_CELL + 16, width: Math.max(104, mesa.ancho * MAPA_CELL - 8), height: Math.max(88, mesa.alto * MAPA_CELL - 8) }}>
+              <strong>{mesa.nombre}</strong>
+              <span className="mapa-estado"><i className="mapa-dot" />{estadoMesaLabel(mesa)}{pedido && ` · #${pedido.id}`}</span>
+              <span className="mapa-meta">{pedido ? money.format(Number(pedido.total)) : `${mesa.capacidad} personas`}</span>
+            </button>
+          })}
+        </div>
+      </div>
+    </div>
+  </div>
+}
+
 function manejarError(error: unknown, setError: (message: string) => void, onUnauthorized: () => void) { if (error instanceof ApiError && error.status === 401) { clearSession(); onUnauthorized(); return } setError(error instanceof Error ? error.message : 'No pudimos completar la operación. Revisá la conexión e intentá de nuevo.') }
