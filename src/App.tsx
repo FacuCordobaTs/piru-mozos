@@ -114,6 +114,7 @@ function Comanda({ session, menu, mesa, pedido, draft, setDraft, offline, error,
   const [itemEditando, setItemEditando] = useState<PedidoItem | null>(null)
   const [confirmando, setConfirmando] = useState(false)
   const [mutando, setMutando] = useState(false)
+  const productosRef = useRef<HTMLDivElement>(null)
   const total = useMemo(() => draft.reduce((sum, item) => sum + precioItem(item) * item.cantidad, 0), [draft])
   const categorias = useMemo(() => {
     const productos = menu?.productos ?? []
@@ -203,6 +204,10 @@ function Comanda({ session, menu, mesa, pedido, draft, setDraft, offline, error,
     setItemEditando(opciones?.item ?? null)
   }
   const cerrarConfigurador = () => { setProducto(null); setDraftEditando(null); setItemEditando(null) }
+  const seleccionarCategoria = (categoriaId: number) => {
+    setCategoria(categoriaId)
+    requestAnimationFrame(() => requestAnimationFrame(() => productosRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })))
+  }
   const sinProductos = !pedido && draft.length === 0
   return <main className="pedido"><header className="mesa-header"><button className="back" type="button" onClick={onBack}>‹ Mesas</button><h1>{mesa.nombre}</h1></header>
     {offline && <p className="network warning">Sin conexión</p>}{error && <p className="network error" role="alert">{error}</p>}
@@ -216,8 +221,8 @@ function Comanda({ session, menu, mesa, pedido, draft, setDraft, offline, error,
         if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && productosVisibles.length > 0) { e.preventDefault(); setIndiceSeleccionado((prev) => (prev + (e.key === 'ArrowDown' ? 1 : -1) + productosVisibles.length) % productosVisibles.length) }
         if (e.key === 'Enter' && productosVisibles.length > 0) { e.preventDefault(); const seleccionado = productosVisibles[Math.min(indiceSeleccionado, productosVisibles.length - 1)]; if (seleccionado) abrirProducto(seleccionado) }
       }} />
-      {!buscando && <div className="tabs" role="tablist">{categorias.map((c) => <button key={c.id} type="button" className={categoriaActiva === c.id ? 'active' : ''} onClick={() => setCategoria(c.id)}>{c.nombre}</button>)}</div>}
-      <div className="product-list">{productosVisibles.length === 0 ? (menu ? <p className="muted">No se encontraron productos.</p> : null) : porCategoria.map(([cat, items]) => <div key={cat}>{buscando && <h3 className="categoria-title">{cat}</h3>}{items.map((p) => <button key={p.id} type="button" disabled={!!pedido && (!pedido.editable || mutando)} className={`product${indicePlano.get(p.id) === indiceSeleccionado ? ' selected' : ''}`} onClick={() => abrirProducto(p)}><span><strong>{p.nombre}</strong><small>{money.format(Number(p.precio))}</small></span><b>+</b></button>)}</div>)}</div>
+      {!buscando && <div className="tabs" role="tablist" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>{categorias.map((c) => <button key={c.id} type="button" className={categoriaActiva === c.id ? 'active' : ''} onClick={() => seleccionarCategoria(c.id)}>{c.nombre}</button>)}</div>}
+      <div ref={productosRef} className="product-list">{productosVisibles.length === 0 ? (menu ? <p className="muted">No se encontraron productos.</p> : null) : porCategoria.map(([cat, items]) => <div key={cat}>{buscando && <h3 className="categoria-title">{cat}</h3>}{items.map((p) => <button key={p.id} type="button" disabled={!!pedido && (!pedido.editable || mutando)} className={`product${indicePlano.get(p.id) === indiceSeleccionado ? ' selected' : ''}`} onClick={() => abrirProducto(p)}><span><strong>{p.nombre}</strong><small>{money.format(Number(p.precio))}</small></span><b>+</b></button>)}</div>)}</div>
     </section>
     {!pedido && <footer className="checkout"><span>Total <strong>{money.format(total)}</strong></span><button className="primary" type="button" disabled={!draft.length || offline || confirmando} onClick={() => void confirmar()}>{confirmando ? 'Confirmando…' : 'Confirmar pedido'}</button></footer>}
     {producto && <Configurador producto={producto} initialItem={draftEditando != null ? draft[draftEditando] : itemEditando ? draftDesdePedido(producto, itemEditando) : undefined} editando={draftEditando != null || itemEditando != null} onClose={cerrarConfigurador} onGuardar={(item) => {
