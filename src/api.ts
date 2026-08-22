@@ -4,12 +4,30 @@ const MENU_KEY = 'piru-mozos-menu'
 
 export type Session = { token: string; expiraAt: string; usuario: { id: number; nombre: string; rol: string; sucursalId: number | null; numeroMozo?: number | null } }
 export type LoginOtpStart = { verificationId: string; expiraEnSegundos: number }
-export type Producto = { id: number; categoriaId: number; nombre: string; precio: string | number; variantes: Array<{ id: number; nombre: string; precio: string | number }>; ingredientes: Array<{ id: number; nombre: string }>; agregados: Array<{ id: number; nombre: string; precio: string | number }> }
+export type OpcionProducto = { id: number; nombre: string; precio: string | number; grupo?: number }
+export type Producto = {
+  id: number
+  categoriaId: number
+  nombre: string
+  precio: string | number
+  variantes: OpcionProducto[]
+  variantesSecundarias: OpcionProducto[]
+  ingredientes: Array<{ id: number; nombre: string }>
+  agregados: OpcionProducto[]
+  agregadosPrimarios: OpcionProducto[]
+  agregadosSecundarios: OpcionProducto[]
+  tituloVariantesPrimarias: string
+  tituloVariantesSecundarias: string
+  tituloExtrasPrimarios: string
+  tituloExtrasSecundarios: string
+  permiteNota: boolean
+  tituloNota: string
+}
 export type Menu = { categorias: Array<{ id: number; nombre: string }>; productos: Producto[] }
 export type Mesa = { id: number; nombre: string; posicionX: number; posicionY: number; ancho: number; alto: number; capacidad: number; pedido: { id: number; estado: string; total: string | number; version: number } | null }
-export type PedidoItem = { id: number; productoId: number; nombreProducto: string; varianteId: number | null; varianteNombre: string | null; precioUnitario: string | number; cantidad: number; ingredientesExcluidos: number[] | null; agregados: Array<{ id: number; nombre: string; precio: string | number }> | null }
+export type PedidoItem = { id: number; productoId: number; nombreProducto: string; varianteId: number | null; varianteNombre: string | null; varianteSecundariaId: number | null; varianteSecundariaNombre: string | null; precioUnitario: string | number; cantidad: number; ingredientesExcluidos: number[] | null; ingredientesExcluidosNombres?: string[]; agregados: Array<{ id: number; nombre: string; precio: string | number }> | null; nota: string | null }
 export type Pedido = { id: number; estado: string; total: string | number; version: number; nombreCliente: string | null; notas: string | null; editable: boolean; motivosNoEditable: string[]; items: PedidoItem[] }
-export type PedidoItemInput = { productoId: number; varianteId?: number; cantidad: number; ingredientesExcluidos: number[]; agregados: Array<{ id: number }> }
+export type PedidoItemInput = { productoId: number; varianteId?: number; varianteSecundariaId?: number; cantidad: number; ingredientesExcluidos: number[]; agregados: Array<{ id: number }>; nota?: string }
 export class ApiError extends Error { constructor(message: string, public status: number, public data?: { pedido?: Pedido | null; code?: string }) { super(message) } }
 
 export function getSession(): Session | null { try { const raw = localStorage.getItem(SESSION_KEY); return raw ? JSON.parse(raw) as Session : null } catch { return null } }
@@ -18,11 +36,33 @@ async function request<T>(path: string, token?: string, init?: RequestInit): Pro
 export async function login(codigoAcceso: string, pin: string) { const session = await request<Session>('/staff/login', undefined, { method: 'POST', body: JSON.stringify({ codigoAcceso, pin }) }); localStorage.setItem(SESSION_KEY, JSON.stringify(session)); return session }
 export const startLoginOtp = (telefono: string, numeroMozo: number) => request<LoginOtpStart>('/staff/login-otp/start', undefined, { method: 'POST', body: JSON.stringify({ telefono, numeroMozo }) })
 export async function verifyLoginOtp(verificationId: string, codigo: string, numeroMozo: number) { const session = await request<Session>('/staff/login-otp/verify', undefined, { method: 'POST', body: JSON.stringify({ verificationId, codigo, numeroMozo }) }); localStorage.setItem(SESSION_KEY, JSON.stringify(session)); return session }
-export async function getMenu(token: string) { try { const menu = await request<Menu>('/mozos/menu', token); localStorage.setItem(MENU_KEY, JSON.stringify(menu)); return menu } catch (error) { const cached = localStorage.getItem(MENU_KEY); if (cached && (!(error instanceof ApiError) || error.status === 0)) return JSON.parse(cached) as Menu; throw error } }
+function normalizarMenu(menu: Menu): Menu {
+  return { ...menu, productos: (menu.productos ?? []).map((producto) => {
+    const variantes = producto.variantes ?? []
+    const agregados = producto.agregados ?? []
+    return {
+      ...producto,
+      variantes,
+      variantesSecundarias: producto.variantesSecundarias ?? variantes.filter((opcion) => opcion.grupo === 2),
+      ingredientes: producto.ingredientes ?? [],
+      agregados,
+      agregadosPrimarios: producto.agregadosPrimarios ?? agregados.filter((opcion) => (opcion.grupo ?? 1) === 1),
+      agregadosSecundarios: producto.agregadosSecundarios ?? agregados.filter((opcion) => opcion.grupo === 2),
+      tituloVariantesPrimarias: producto.tituloVariantesPrimarias || 'Elegí una opción',
+      tituloVariantesSecundarias: producto.tituloVariantesSecundarias || 'Elegí también una segunda opción',
+      tituloExtrasPrimarios: producto.tituloExtrasPrimarios || 'Extras',
+      tituloExtrasSecundarios: producto.tituloExtrasSecundarios || 'Extras',
+      permiteNota: producto.permiteNota ?? false,
+      tituloNota: producto.tituloNota || '¿Querés aclarar algo?',
+    }
+  }) }
+}
+export async function getMenu(token: string) { try { const menu = normalizarMenu(await request<Menu>('/mozos/menu', token)); localStorage.setItem(MENU_KEY, JSON.stringify(menu)); return menu } catch (error) { const cached = localStorage.getItem(MENU_KEY); if (cached && (!(error instanceof ApiError) || error.status === 0)) return normalizarMenu(JSON.parse(cached) as Menu); throw error } }
 export const getMesas = (token: string) => request<Mesa[]>('/mozos/mesas', token)
 export const getPedido = (token: string, id: number) => request<Pedido>(`/mozos/pedidos/${id}`, token)
 export const createPedido = (token: string, payload: unknown) => request<Pedido>('/mozos/pedidos', token, { method: 'POST', body: JSON.stringify(payload) })
 export const addPedidoItem = (token: string, pedidoId: number, version: number, item: PedidoItemInput) => request<Pedido>(`/mozos/pedidos/${pedidoId}/items`, token, { method: 'POST', body: JSON.stringify({ ...item, version }) })
+export const updatePedidoItem = (token: string, pedidoId: number, itemId: number, version: number, item: PedidoItemInput) => request<Pedido>(`/mozos/pedidos/${pedidoId}/items/${itemId}`, token, { method: 'PUT', body: JSON.stringify({ ...item, version }) })
 export const deletePedidoItem = (token: string, pedidoId: number, itemId: number, version: number) => request<Pedido>(`/mozos/pedidos/${pedidoId}/items/${itemId}`, token, { method: 'DELETE', body: JSON.stringify({ version }) })
 export const updatePedidoDatos = (token: string, pedidoId: number, version: number, datos: { nombreCliente?: string | null; notas?: string | null }) => request<Pedido>(`/mozos/pedidos/${pedidoId}`, token, { method: 'PUT', body: JSON.stringify({ ...datos, version }) })
 
