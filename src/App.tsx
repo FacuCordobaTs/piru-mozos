@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import {
   addPedidoItem, ApiError, clearSession, connectPedidos, createPedido, deletePedidoItem,
-  getMenu, getMesas, getPedido, getSession, login,
+  getMenu, getMesas, getPedido, getSession, startLoginOtp, verifyLoginOtp,
   type Mesa, type Menu, type Pedido, type PedidoItemInput, type Producto, type Session,
 } from './api'
 
@@ -21,21 +21,43 @@ export function App() {
 }
 
 function Login({ onLogin }: { onLogin: (session: Session) => void }) {
-  const [codigoAcceso, setCodigoAcceso] = useState('')
-  const [pin, setPin] = useState('')
+  const [telefono, setTelefono] = useState('')
+  const [numeroMozo, setNumeroMozo] = useState('')
+  const [codigo, setCodigo] = useState('')
+  const [verificationId, setVerificationId] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [enviando, setEnviando] = useState(false)
+  const telefonoNormalizado = () => {
+    const digitos = telefono.replace(/\D/g, '')
+    return digitos.startsWith('54') ? digitos : `54${digitos}`
+  }
   async function submit(event: FormEvent) {
     event.preventDefault(); setError(''); setEnviando(true)
-    try { onLogin(await login(codigoAcceso.trim(), pin)) }
+    try {
+      const numero = Number(numeroMozo)
+      if (!verificationId) {
+        const inicio = await startLoginOtp(telefonoNormalizado(), numero)
+        setVerificationId(inicio.verificationId)
+        setCodigo('')
+      } else {
+        onLogin(await verifyLoginOtp(verificationId, codigo, numero))
+      }
+    }
     catch (e) { setError(e instanceof Error ? e.message : 'No pudimos iniciar el turno') }
     finally { setEnviando(false) }
   }
   return <main className="login-page"><form className="login-card" onSubmit={submit}>
     <p className="eyebrow">Piru · Mozos</p><h1>Empezá tu turno</h1>
-    <label>Código de acceso<input autoCapitalize="none" autoComplete="username" value={codigoAcceso} onChange={(e) => setCodigoAcceso(e.target.value)} minLength={16} required /></label>
-    <label>PIN<input inputMode="numeric" autoComplete="current-password" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))} minLength={4} maxLength={8} required /></label>
-    {error && <p className="error" role="alert">{error}</p>}<button className="primary wide" disabled={enviando}>{enviando ? 'Ingresando…' : 'Ingresar'}</button>
+    {!verificationId ? <>
+      <p className="login-help">Ingresá el WhatsApp del local y tu número de mozo.</p>
+      <label>WhatsApp del local<input type="tel" inputMode="numeric" autoComplete="tel" placeholder="9 351 123 4567" value={telefono} onChange={(e) => setTelefono(e.target.value)} minLength={8} required /></label>
+      <label>Tu número de mozo<input inputMode="numeric" autoComplete="username" placeholder="Ej: 2" value={numeroMozo} onChange={(e) => setNumeroMozo(e.target.value.replace(/\D/g, '').slice(0, 6))} min="1" required /></label>
+    </> : <>
+      <p className="login-help">Enviamos un código de 6 dígitos al WhatsApp del local.</p>
+      <label>Código de WhatsApp<input className="otp-input" inputMode="numeric" autoComplete="one-time-code" value={codigo} onChange={(e) => setCodigo(e.target.value.replace(/\D/g, '').slice(0, 6))} minLength={6} maxLength={6} autoFocus required /></label>
+      <button className="text-button" type="button" onClick={() => { setVerificationId(null); setCodigo(''); setError('') }}>Cambiar datos</button>
+    </>}
+    {error && <p className="error" role="alert">{error}</p>}<button className="primary wide" disabled={enviando}>{enviando ? 'Procesando…' : verificationId ? 'Ingresar' : 'Enviar código'}</button>
   </form></main>
 }
 

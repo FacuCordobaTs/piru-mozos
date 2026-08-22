@@ -2,7 +2,8 @@ const API_URL = import.meta.env.VITE_API_URL || 'https://api.piru.app/api'
 const SESSION_KEY = 'piru-mozos-session'
 const MENU_KEY = 'piru-mozos-menu'
 
-export type Session = { token: string; expiraAt: string; usuario: { id: number; nombre: string; rol: string; sucursalId: number | null } }
+export type Session = { token: string; expiraAt: string; usuario: { id: number; nombre: string; rol: string; sucursalId: number | null; numeroMozo?: number | null } }
+export type LoginOtpStart = { verificationId: string; expiraEnSegundos: number }
 export type Producto = { id: number; categoriaId: number; nombre: string; precio: string | number; variantes: Array<{ id: number; nombre: string; precio: string | number }>; ingredientes: Array<{ id: number; nombre: string }>; agregados: Array<{ id: number; nombre: string; precio: string | number }> }
 export type Menu = { categorias: Array<{ id: number; nombre: string }>; productos: Producto[] }
 export type Mesa = { id: number; nombre: string; posicionX: number; posicionY: number; ancho: number; alto: number; capacidad: number; pedido: { id: number; estado: string; total: string | number; version: number } | null }
@@ -15,6 +16,8 @@ export function getSession(): Session | null { try { const raw = localStorage.ge
 export function clearSession() { localStorage.removeItem(SESSION_KEY) }
 async function request<T>(path: string, token?: string, init?: RequestInit): Promise<T> { let response: Response; try { response = await fetch(`${API_URL}${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...init?.headers } }) } catch { throw new ApiError('No hay conexión con Piru. Tu pedido no fue confirmado.', 0) } const body = response.status === 304 ? null : await response.json().catch(() => null); if (!response.ok) throw new ApiError(body?.message || 'No pudimos completar la operación', response.status, body?.data ? { ...body.data, code: body.code } : { code: body?.code }); return body?.data as T }
 export async function login(codigoAcceso: string, pin: string) { const session = await request<Session>('/staff/login', undefined, { method: 'POST', body: JSON.stringify({ codigoAcceso, pin }) }); localStorage.setItem(SESSION_KEY, JSON.stringify(session)); return session }
+export const startLoginOtp = (telefono: string, numeroMozo: number) => request<LoginOtpStart>('/staff/login-otp/start', undefined, { method: 'POST', body: JSON.stringify({ telefono, numeroMozo }) })
+export async function verifyLoginOtp(verificationId: string, codigo: string, numeroMozo: number) { const session = await request<Session>('/staff/login-otp/verify', undefined, { method: 'POST', body: JSON.stringify({ verificationId, codigo, numeroMozo }) }); localStorage.setItem(SESSION_KEY, JSON.stringify(session)); return session }
 export async function getMenu(token: string) { try { const menu = await request<Menu>('/mozos/menu', token); localStorage.setItem(MENU_KEY, JSON.stringify(menu)); return menu } catch (error) { const cached = localStorage.getItem(MENU_KEY); if (cached && (!(error instanceof ApiError) || error.status === 0)) return JSON.parse(cached) as Menu; throw error } }
 export const getMesas = (token: string) => request<Mesa[]>('/mozos/mesas', token)
 export const getPedido = (token: string, id: number) => request<Pedido>(`/mozos/pedidos/${id}`, token)
