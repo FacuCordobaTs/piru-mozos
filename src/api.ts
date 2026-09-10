@@ -2,7 +2,9 @@ const API_URL = import.meta.env.VITE_API_URL || 'https://api.piru.app/api'
 const SESSION_KEY = 'piru-mozos-session'
 const MENU_KEY = 'piru-mozos-menu'
 
-export type Session = { token: string; expiraAt: string; usuario: { id: number; nombre: string; rol: string; sucursalId: number | null; numeroMozo?: number | null } }
+// La sesión se conserva en localStorage hasta que el mozo elige salir o el
+// backend la revoca. `null` significa que no tiene vencimiento temporal.
+export type Session = { token: string; expiraAt: string | null; usuario: { id: number; nombre: string; rol: string; sucursalId: number | null; numeroMozo?: number | null } }
 export type LoginOtpStart = { verificationId: string; expiraEnSegundos: number }
 export type OpcionProducto = { id: number; nombre: string; precio: string | number; grupo?: number }
 export type Producto = {
