@@ -28,6 +28,11 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   const [enviando, setEnviando] = useState(false)
   const telefonoNormalizado = () => {
     const digitos = telefono.replace(/\D/g, '')
+    if (digitos.startsWith('549') && digitos.length === 13) return digitos
+    if (digitos.startsWith('54') && digitos.length === 12) return `549${digitos.slice(2)}`
+    if (digitos.startsWith('0') && digitos.length === 11) return `549${digitos.slice(1)}`
+    if (digitos.startsWith('9') && digitos.length === 11) return `549${digitos.slice(1)}`
+    if (digitos.length === 10) return `549${digitos}`
     return digitos.startsWith('54') ? digitos : `54${digitos}`
   }
   async function submit(event: FormEvent) {
