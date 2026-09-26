@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import {
   addPedidoItem, ApiError, clearSession, connectPedidos, createPedido, deletePedidoItem,
-  getMenu, getMesas, getPedido, getSession, startLoginOtp, updatePedidoItem, verifyLoginOtp,
+  getMenu, getMesas, getPedido, getSession, startLoginOtp, updatePedidoDatos, updatePedidoItem, verifyLoginOtp,
   type Mesa, type Menu, type Pedido, type PedidoItem, type PedidoItemInput, type Producto, type Session,
 } from './api'
 
@@ -119,6 +119,11 @@ function Comanda({ session, menu, mesa, pedido, draft, setDraft, offline, error,
   const [itemEditando, setItemEditando] = useState<PedidoItem | null>(null)
   const [confirmando, setConfirmando] = useState(false)
   const [mutando, setMutando] = useState(false)
+  // El nombre del pedido sale en la comanda que imprime el admin: en una mesa
+  // nueva viaja con el alta; en una abierta se guarda al salir del campo.
+  const [nombre, setNombre] = useState('')
+  const [guardandoNombre, setGuardandoNombre] = useState(false)
+  useEffect(() => { setNombre(pedido?.nombreCliente ?? '') }, [pedido?.nombreCliente])
   const productosRef = useRef<HTMLDivElement>(null)
   const total = useMemo(() => draft.reduce((sum, item) => sum + precioItem(item) * item.cantidad, 0), [draft])
   const categorias = useMemo(() => {
@@ -163,7 +168,7 @@ function Comanda({ session, menu, mesa, pedido, draft, setDraft, offline, error,
     if (!draft.length || offline || pedido) return
     setConfirmando(true); onError('')
     try {
-      await createPedido(session.token, { mesaLocalId: mesa.id, items: draft.map(itemInput) })
+      await createPedido(session.token, { mesaLocalId: mesa.id, nombreCliente: nombre.trim() || undefined, items: draft.map(itemInput) })
       onPedidoCreado()
     }
     catch (e) { manejarError(e, onError, () => undefined) }
@@ -203,6 +208,14 @@ function Comanda({ session, menu, mesa, pedido, draft, setDraft, offline, error,
     catch (e) { if (!recuperarConflicto(e)) manejarError(e, onError, () => undefined) }
     finally { setMutando(false) }
   }
+  const guardarNombre = async () => {
+    const valor = nombre.trim()
+    if (!pedido || offline || !pedido.editable || guardandoNombre || valor === (pedido.nombreCliente ?? '').trim()) return
+    setGuardandoNombre(true); onError('')
+    try { onPedidoActualizado(await updatePedidoDatos(session.token, pedido.id, pedido.version, { nombreCliente: valor || null })) }
+    catch (e) { if (!recuperarConflicto(e)) manejarError(e, onError, () => undefined) }
+    finally { setGuardandoNombre(false) }
+  }
   const abrirProducto = (productoSeleccionado: Producto, opciones?: { draftIndex?: number; item?: PedidoItem }) => {
     setProducto(productoSeleccionado)
     setDraftEditando(opciones?.draftIndex ?? null)
@@ -216,6 +229,7 @@ function Comanda({ session, menu, mesa, pedido, draft, setDraft, offline, error,
   const sinProductos = !pedido && draft.length === 0
   return <main className="pedido"><header className="mesa-header"><button className="back" type="button" onClick={onBack}>‹ Mesas</button><h1>{mesa.nombre}</h1></header>
     {offline && <p className="network warning">Sin conexión</p>}{error && <p className="network error" role="alert">{error}</p>}
+    <input className="nombre-pedido" aria-label="Nombre del pedido" placeholder="Nombre del pedido (opcional)" maxLength={255} autoComplete="off" autoCapitalize="words" enterKeyHint="done" value={nombre} disabled={!!pedido && (!pedido.editable || offline)} onChange={(e) => setNombre(e.target.value)} onBlur={() => void guardarNombre()} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} />
     {sinProductos ? <p className="mesa-vacia">MESA VACIA</p> : <section className="order-card"><div className="order-heading"><span>Comanda</span><strong>{pedido ? money.format(Number(pedido.total)) : money.format(total)}</strong></div>{pedido ? <ul className="items">{pedido.items.map((item) => {
       const productoItem = menu?.productos.find((productoMenu) => productoMenu.id === item.productoId)
       return <li key={item.id} className={productoItem && pedido.editable ? 'item-editable' : ''} onClick={() => productoItem && pedido.editable && abrirProducto(productoItem, { item })}><div><strong>{item.nombreProducto}</strong><small>{descripcionPedidoItem(item)} · {money.format(Number(item.precioUnitario))}{item.cantidad > 1 ? ` × ${item.cantidad}` : ''}</small></div><button className="remove-x" aria-label={`Quitar ${item.nombreProducto}`} type="button" disabled={!pedido.editable || offline || mutando} onClick={(event) => { event.stopPropagation(); void eliminarExistente(item.id) }}>×</button></li>
