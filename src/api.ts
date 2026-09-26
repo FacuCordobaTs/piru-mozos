@@ -63,7 +63,8 @@ export async function getMenu(token: string) { try { const menu = normalizarMenu
 export const getMesas = (token: string) => request<Mesa[]>('/mozos/mesas', token)
 export const getPedido = (token: string, id: number) => request<Pedido>(`/mozos/pedidos/${id}`, token)
 export const createPedido = (token: string, payload: unknown) => request<Pedido>('/mozos/pedidos', token, { method: 'POST', body: JSON.stringify(payload) })
-export const addPedidoItem = (token: string, pedidoId: number, version: number, item: PedidoItemInput) => request<Pedido>(`/mozos/pedidos/${pedidoId}/items`, token, { method: 'POST', body: JSON.stringify({ ...item, version }) })
+// Todos los productos nuevos viajan juntos para que el admin los imprima en una sola comanda.
+export const addPedidoItems = (token: string, pedidoId: number, version: number, items: PedidoItemInput[]) => request<Pedido>(`/mozos/pedidos/${pedidoId}/items`, token, { method: 'POST', body: JSON.stringify({ items, version }) })
 export const updatePedidoItem = (token: string, pedidoId: number, itemId: number, version: number, item: PedidoItemInput) => request<Pedido>(`/mozos/pedidos/${pedidoId}/items/${itemId}`, token, { method: 'PUT', body: JSON.stringify({ ...item, version }) })
 export const deletePedidoItem = (token: string, pedidoId: number, itemId: number, version: number) => request<Pedido>(`/mozos/pedidos/${pedidoId}/items/${itemId}`, token, { method: 'DELETE', body: JSON.stringify({ version }) })
 export const updatePedidoDatos = (token: string, pedidoId: number, version: number, datos: { nombreCliente?: string | null; notas?: string | null }) => request<Pedido>(`/mozos/pedidos/${pedidoId}`, token, { method: 'PUT', body: JSON.stringify({ ...datos, version }) })
